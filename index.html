@@ -1,0 +1,923 @@
+<!doctype html>
+<html lang="en">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta charset="utf-8">
+<title>Highlight Reader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&display=swap">
+<style>
+/* Layout: the book as a reading column, with your highlights in a sticky rail beside it. E-ink paper palette. */
+:root {
+  --paper: #ecebe6; --sheet: #f8f7f3; --ink: #1c1d1f; --ink-soft: #5d6066; --rule: #d6d5ce;
+  --accent: #2d4f7c; --accent-ink: #ffffff; --tint: #e3e2db; --warn: #9b3d22;
+  --hl0: #f2c230; --hl1: #f2c230; --hl2: #ee7aa0; --hl3: #5aa7ee; --hl4: #63c27a; --mark-mix: 46%;
+  --font-read: "Literata", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --top-h: 56px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121314; --sheet: #1a1b1d; --ink: #e4e3de; --ink-soft: #9c9ea3; --rule: #2e3033;
+    --accent: #93b4e0; --accent-ink: #0f1a2a; --tint: #25272b; --warn: #e3907a; --mark-mix: 34%; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121314; --sheet: #1a1b1d; --ink: #e4e3de; --ink-soft: #9c9ea3; --rule: #2e3033;
+  --accent: #93b4e0; --accent-ink: #0f1a2a; --tint: #25272b; --warn: #e3907a; --mark-mix: 34%; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--font-ui); -webkit-font-smoothing: antialiased; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--paper); }
+button, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.c0 { --hlc: var(--hl0); } .c1 { --hlc: var(--hl1); } .c2 { --hlc: var(--hl2); } .c3 { --hlc: var(--hl3); } .c4 { --hlc: var(--hl4); }
+
+/* header */
+.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; height: var(--top-h); display: flex; align-items: center; gap: 14px;
+  padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px));
+  background: var(--paper); border-bottom: 1px solid var(--rule); }
+.brand { font-weight: 700; letter-spacing: -0.015em; white-space: nowrap; font-size: 15px; }
+.brand .mk { background: color-mix(in srgb, var(--hl1) var(--mark-mix), transparent); padding: 0 3px; margin-left: -3px; border-radius: 2px; }
+.book-id { flex: 1; min-width: 0; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 14px; }
+.book-id b { color: var(--ink); font-weight: 600; }
+.pill { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  letter-spacing: .04em; text-transform: uppercase; background: var(--tint); color: var(--ink-soft); vertical-align: 1px; }
+.actions { display: flex; gap: 8px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 7px; border: 1px solid var(--rule);
+  background: var(--sheet); cursor: pointer; white-space: nowrap; font-size: 14px; font-weight: 500; }
+.btn:hover { border-color: var(--ink-soft); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn[disabled] { opacity: .45; cursor: default; }
+.btn input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.short { display: none; }
+
+/* workspace */
+.tabs { display: none; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 410px); }
+.workspace.no-book { grid-template-columns: minmax(0, 760px); justify-content: center; }
+#reader { min-width: 0; padding-block: 48px 40vh; padding-left: max(32px, env(safe-area-inset-left, 0px)); padding-right: 32px; }
+.workspace.no-book #reader { display: none; }
+#panel { position: sticky; top: calc(var(--top-h) + env(safe-area-inset-top, 0px)); min-width: 0;
+  height: calc(100dvh - var(--top-h) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto; border-left: 1px solid var(--rule); background: var(--sheet); }
+.workspace.no-book #panel { position: static; height: auto; overflow: visible; border-left: 0; background: transparent; }
+.pad { padding-left: 18px; padding-right: max(18px, env(safe-area-inset-right, 0px)); }
+.workspace.no-book .pad { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.panel-head { position: sticky; top: 0; z-index: 2; padding-block: 14px 12px; background: var(--sheet); border-bottom: 1px solid var(--rule); }
+.workspace.no-book .panel-head { top: calc(var(--top-h) + env(safe-area-inset-top, 0px)); background: var(--paper); padding-block: 22px 14px; }
+.stats { font-size: 13px; color: var(--ink-soft); margin-bottom: 10px; font-variant-numeric: tabular-nums; }
+.stats b { color: var(--ink); font-weight: 600; }
+.search { width: 100%; height: 36px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--rule); background: var(--paper); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--rule);
+  background: var(--paper); font-size: 13px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.chip .sw { width: 10px; height: 10px; border-radius: 50%; background: var(--hlc); }
+.chip[aria-pressed="false"] { opacity: .42; }
+.chip.toggle[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.banners { display: grid; gap: 10px; padding-block: 14px 0; }
+.banner { padding: 12px 14px; border-radius: 9px; background: var(--tint); font-size: 14px; display: grid; gap: 10px; }
+.banner p { margin: 0; }
+.banner .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.banner.warn { background: color-mix(in srgb, var(--warn) 15%, var(--sheet)); }
+.banner details { font-size: 13px; color: var(--ink-soft); }
+.banner summary { cursor: pointer; color: var(--ink); font-weight: 500; }
+.banner details p { margin-top: 6px; }
+.list { padding-block: 4px 48px; }
+.group-title { font: 600 11.5px/1.3 var(--font-ui); text-transform: uppercase; letter-spacing: .07em; color: var(--ink-soft);
+  margin: 24px 0 4px; display: flex; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; text-wrap: balance; }
+.entry { padding: 12px 10px; margin: 0 -10px; border-bottom: 1px solid var(--rule); border-radius: 0; }
+.entry:last-child { border-bottom: 0; }
+.entry .quote { margin: 0; font: 400 1.02rem/1.6 var(--font-read); }
+.entry .quote span { background: color-mix(in srgb, var(--hlc) var(--mark-mix), transparent); padding: 1px 2px;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone; border-radius: 2px; }
+.entry .note { margin-top: 8px; padding: 8px 10px; border-radius: 7px; background: var(--tint); white-space: pre-wrap; font-size: 14px; }
+.entry .note::before { content: "Note"; display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 2px; }
+.entry .meta { margin-top: 6px; font-size: 12px; color: var(--ink-soft); display: flex; gap: 12px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.entry .meta .flag { color: var(--warn); }
+.entry.bookmark .quote { font: 600 13px/1.4 var(--font-ui); color: var(--ink-soft); display: flex; align-items: center; gap: 8px; }
+.ribbon { display: inline-block; width: 9px; height: 13px; background: var(--accent); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); }
+.entry.clickable { cursor: pointer; }
+.entry.clickable:hover { background: var(--tint); }
+.entry.active { background: var(--tint); box-shadow: inset 0 0 0 1.5px var(--accent); border-radius: 8px; }
+.empty { color: var(--ink-soft); padding: 24px 0; text-align: center; }
+
+/* book */
+#reader .chapter { max-width: 38rem; margin: 0 auto; font: 400 1.1rem/1.75 var(--font-read); overflow-wrap: break-word; }
+#reader .chapter + .chapter { margin-top: 3.5em; padding-top: 3em; border-top: 1px solid var(--rule); }
+#reader h1, #reader h2, #reader h3, #reader h4 { line-height: 1.25; font-weight: 600; text-wrap: balance; }
+#reader img, #reader svg { max-width: 100%; height: auto; }
+#reader a { color: var(--accent); }
+#reader sup, #reader sub { line-height: 0; }
+#reader blockquote { margin: 1em 1.5em; }
+#reader table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; }
+#reader td, #reader th { border: 1px solid var(--rule); padding: 4px 8px; }
+#reader [class*="italic" i] { font-style: italic; }
+#reader [class*="bold" i] { font-weight: 600; }
+#reader [class*="smallcap" i], #reader [class*="small-cap" i], #reader [class*="smcap" i] { font-variant: small-caps; }
+#reader [class*="center" i] { text-align: center; }
+#reader mark { color: inherit; background: color-mix(in srgb, var(--hlc) var(--mark-mix), transparent); border-radius: 2px; cursor: pointer; scroll-margin: 35vh 0; }
+#reader mark.has-note { box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--hlc) 80%, var(--ink)); }
+#reader mark mark { background: color-mix(in srgb, var(--hlc) 30%, transparent); }
+#reader .bm { display: inline-block; width: 9px; height: 14px; margin: 0 2px; vertical-align: -1px; background: var(--accent);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); cursor: pointer; scroll-margin: 35vh 0; }
+#reader .anchor { display: inline-block; width: 0; scroll-margin: 35vh 0; }
+#reader .flash { animation: flash 1.6s ease-out; }
+@keyframes flash { 0%, 35% { outline: 3px solid var(--accent); outline-offset: 2px; } 100% { outline: 3px solid transparent; outline-offset: 2px; } }
+
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 60;
+  max-width: min(560px, calc(100vw - 32px)); padding: 10px 16px; border-radius: 9px; background: var(--ink); color: var(--paper); font-size: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.18); }
+.toast.error { background: var(--warn); color: var(--sheet); }
+.drag-veil { display: none; position: fixed; inset: 0; z-index: 50; background: color-mix(in srgb, var(--accent) 12%, transparent); border: 3px dashed var(--accent); pointer-events: none; }
+body.dragging .drag-veil { display: block; }
+.sheet-veil { position: fixed; inset: 0; z-index: 70; background: rgba(0,0,0,.35); display: grid; place-items: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.sheet { width: min(640px, 100%); background: var(--sheet); border-radius: 12px; padding: 18px; display: grid; gap: 12px; }
+.sheet h2 { margin: 0; font-size: 16px; }
+.sheet p { margin: 0; color: var(--ink-soft); font-size: 14px; }
+.sheet textarea { width: 100%; height: 50vh; resize: vertical; border: 1px solid var(--rule); border-radius: 8px; padding: 10px; background: var(--paper); font: 13px/1.5 ui-monospace, Menlo, monospace; }
+.sheet .row { display: flex; justify-content: flex-end; gap: 8px; }
+@media (prefers-reduced-motion: reduce) { #reader .flash { animation: none; outline: 3px solid var(--accent); } }
+
+@media (max-width: 899px) {
+  .top { gap: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .book-id { display: none; }
+  .brand { flex: 1; }
+  .btn { padding: 0 11px; }
+  .long { display: none; } .short { display: inline; }
+  .workspace.has-book { grid-template-columns: minmax(0, 1fr); }
+  .tabs.on { display: flex; position: sticky; top: calc(var(--top-h) + env(safe-area-inset-top, 0px)); z-index: 9; background: var(--paper); border-bottom: 1px solid var(--rule);
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .tabs button { flex: 1; height: 42px; border: 0; background: none; cursor: pointer; font-weight: 600; color: var(--ink-soft); border-bottom: 2px solid transparent; }
+  .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+  body:not(.show-panel) .workspace.has-book #panel { display: none; }
+  body.show-panel .workspace.has-book #reader { display: none; }
+  #panel { position: static; height: auto; border-left: 0; overflow: visible; background: var(--paper); }
+  .pad { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .panel-head, .workspace.no-book .panel-head { background: var(--paper); }
+  .workspace.has-book .panel-head { top: calc(var(--top-h) + 43px + env(safe-area-inset-top, 0px)); }
+  #reader { padding-block: 24px 40vh; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  #reader mark, #reader .bm, #reader .anchor { scroll-margin: 30vh 0; }
+}
+</style>
+
+<header class="top">
+  <div class="brand"><span class="mk">Highlight</span> Reader</div>
+  <div class="book-id" id="bookId"></div>
+  <div class="actions">
+    <label class="btn primary" id="openBtn"><span class="long">Open files…</span><span class="short">Open</span><input type="file" id="pick" multiple></label>
+    <button class="btn" id="copyBtn" type="button" title="Copy every highlight and note as text (Markdown), ready to paste into Notes, Docs or Obsidian"><span class="long">Copy notes</span><span class="short">Copy</span></button>
+  </div>
+</header>
+<div class="drag-veil"></div>
+
+<nav class="tabs" id="tabs" role="tablist">
+  <button role="tab" id="tabBook" aria-selected="true" type="button">Book</button>
+  <button role="tab" id="tabList" aria-selected="false" type="button">Highlights</button>
+</nav>
+
+<div class="workspace no-book" id="workspace">
+  <article id="reader" aria-label="Book text"></article>
+  <aside id="panel" aria-label="Highlights and notes">
+    <div class="panel-head pad">
+      <div class="stats" id="stats"></div>
+      <input class="search" id="search" type="search" placeholder="Search highlights and notes" autocomplete="off" aria-label="Search highlights and notes">
+      <div class="chips" id="chips"></div>
+    </div>
+    <div class="banners pad" id="banners"></div>
+    <div class="list pad" id="list"></div>
+  </aside>
+</div>
+
+<script>
+'use strict';
+const XHTML = 'http://www.w3.org/1999/xhtml', XLINK = 'http://www.w3.org/1999/xlink';
+const ANS = 'http://ns.adobe.com/digitaleditions/annotations', DC = 'http://purl.org/dc/elements/1.1/';
+const OPS = 'http://www.idpf.org/2007/ops';
+const $ = (s, r = document) => r.querySelector(s);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+const S = { annots: [], meta: null, book: null, placed: new Map(), byId: new Map(), q: '', colorsOff: new Set(), notesOnly: false, showBm: true,
+  urls: [], sampleBook: false, sampleAnnots: false };
+
+/* ---------------- small helpers ---------------- */
+const dirOf = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '';
+function decodeSafe(s) { try { return decodeURIComponent(s); } catch { return s; } }
+function resolvePath(base, href) {
+  href = decodeSafe((href || '').split('#')[0]);
+  const parts = (href.startsWith('/') ? href : base + href).split('/'), out = [];
+  for (const s of parts) { if (s === '..') out.pop(); else if (s && s !== '.') out.push(s); }
+  return out.join('/');
+}
+const xml = t => new DOMParser().parseFromString(t, 'application/xml');
+function xhtml(raw) {
+  let d = new DOMParser().parseFromString(raw, 'application/xhtml+xml');
+  if (d.getElementsByTagName('parsererror').length || d.documentElement.namespaceURI !== XHTML)
+    d = new DOMParser().parseFromString(raw, 'text/html');
+  return d;
+}
+const bodyOf = d => d.getElementsByTagNameNS(XHTML, 'body')[0] || d.body || d.documentElement;
+const colorKey = c => (/^[0-4]$/.test(c) ? c : '1');
+const pct = p => isNaN(p) ? '' : `${Math.round(p * 100)}%`;
+function fmtDate(iso) { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); }
+const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const MIME = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', avif: 'image/avif' };
+
+let toastTimer;
+function toast(msg, isError) {
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  const t = el('div', 'toast' + (isError ? ' error' : ''), msg); t.setAttribute('role', 'status');
+  document.body.appendChild(t); clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.remove(), isError ? 7000 : 2800);
+}
+
+/* ---------------- zip (EPUB) reader, no libraries ---------------- */
+async function readZip(file) {
+  if (!('DecompressionStream' in window)) throw new Error('This browser is too old to open EPUB files. Try a current Chrome, Safari or Firefox.');
+  const buf = new Uint8Array(await file.arrayBuffer()), dv = new DataView(buf.buffer);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error(`${file.name} isn't a readable EPUB file.`);
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const entries = new Map(), lower = new Map(), dec = new TextDecoder();
+  for (let n = 0; n < count && p + 46 <= buf.length; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+    const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+    const lho = dv.getUint32(p + 42, true), name = dec.decode(buf.subarray(p + 46, p + 46 + nl));
+    entries.set(name, { method, csize, lho }); lower.set(name.toLowerCase(), name);
+    p += 46 + nl + xl + cl;
+  }
+  const find = name => entries.has(name) ? name : (lower.get((name || '').toLowerCase()) || null);
+  const cache = new Map();
+  async function bytes(name) {
+    name = find(name); if (!name) return null;
+    if (cache.has(name)) return cache.get(name);
+    const e = entries.get(name);
+    const start = e.lho + 30 + dv.getUint16(e.lho + 26, true) + dv.getUint16(e.lho + 28, true);
+    const raw = buf.subarray(start, start + e.csize);
+    let out;
+    if (e.method === 0) out = raw;
+    else if (e.method === 8) out = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+    else throw new Error(`This EPUB uses a compression this page can't read (${name}).`);
+    cache.set(name, out); return out;
+  }
+  return { find, bytes, text: async n => { const b = await bytes(n); return b ? new TextDecoder().decode(b) : null; } };
+}
+
+/* ---------------- .annot parsing ---------------- */
+function parsePoint(raw) {
+  if (!raw) return null;
+  const m = raw.match(/^(.*?)#point\((.*)\)\s*$/);
+  if (!m) return { file: decodeSafe(raw.split('#')[0]), steps: [], offset: null };
+  const [path, off] = m[2].split(':');
+  const steps = path.split('/').filter(Boolean).map(s => parseInt(s, 10)).filter(n => !isNaN(n));
+  return { file: decodeSafe(m[1]), steps, offset: off != null ? (parseInt(off, 10) || 0) : null };
+}
+function parseAnnot(text, name) {
+  const doc = xml(text);
+  if (doc.getElementsByTagName('parsererror').length || doc.documentElement.localName !== 'annotationSet')
+    throw new Error(`${name} isn't a Kobo highlights (.annot) file.`);
+  const kid = (node, ns, tag) => node ? [...node.children].find(c => c.localName === tag && (!ns || c.namespaceURI === ns)) : null;
+  const dc = (node, tag) => (kid(node, DC, tag)?.textContent || '').trim();
+  const pub = doc.getElementsByTagNameNS(ANS, 'publication')[0];
+  const meta = { title: dc(pub, 'title'), creator: dc(pub, 'creator').replace(/[;,\s]+$/, ''), identifier: dc(pub, 'identifier') };
+  const list = [];
+  for (const a of doc.getElementsByTagNameNS(ANS, 'annotation')) {
+    const frag = a.getElementsByTagNameNS(ANS, 'fragment')[0];
+    if (!frag) continue;
+    const startRaw = frag.getAttribute('start') || '', endRaw = frag.getAttribute('end') || startRaw;
+    const txt = (kid(frag, null, 'text')?.textContent || '').replace(/\s+/g, ' ').trim();
+    const note = (kid(kid(a, null, 'content'), null, 'text')?.textContent || '').trim();
+    const start = parsePoint(startRaw);
+    list.push({
+      uid: dc(a, 'identifier'), date: dc(a, 'date'), start, end: parsePoint(endRaw), startRaw, endRaw,
+      text: txt, note, progress: parseFloat(frag.getAttribute('progress')), color: colorKey(frag.getAttribute('color') || '1'),
+      kind: txt ? 'highlight' : (note ? 'note' : 'bookmark'), file: start ? start.file : ''
+    });
+  }
+  return { meta, list };
+}
+
+/* ---------------- EPUB loading ---------------- */
+function indexBook(book) {
+  book.byPath = new Map(); book.byLower = new Map(); book.byBase = new Map();
+  for (const c of book.chapters) {
+    book.byPath.set(c.path, c); book.byLower.set(c.path.toLowerCase(), c);
+    const b = c.path.split('/').pop().toLowerCase(); book.byBase.set(b, book.byBase.has(b) ? null : c);
+  }
+  return book;
+}
+async function loadEpub(file) {
+  const zip = await readZip(file);
+  const cx = await zip.text('META-INF/container.xml');
+  if (!cx) throw new Error(`${file.name} isn't a valid EPUB (it has no container file).`);
+  const opfPath = xml(cx).getElementsByTagNameNS('*', 'rootfile')[0]?.getAttribute('full-path');
+  const opfText = opfPath && await zip.text(opfPath);
+  if (!opfText) throw new Error(`${file.name} isn't a valid EPUB (its package file is missing).`);
+  const opf = xml(opfText), opfDir = dirOf(opfPath);
+  const manifest = new Map();
+  for (const it of opf.getElementsByTagNameNS('*', 'item'))
+    manifest.set(it.getAttribute('id'), { href: resolvePath(opfDir, it.getAttribute('href')), type: it.getAttribute('media-type') || '', props: (it.getAttribute('properties') || '').split(/\s+/) });
+  const chapters = [];
+  for (const ref of opf.getElementsByTagNameNS('*', 'itemref')) {
+    const m = manifest.get(ref.getAttribute('idref'));
+    if (!m || !/html|xml/.test(m.type)) continue;
+    const real = zip.find(m.href); if (!real) continue;
+    chapters.push({ path: real, raw: await zip.text(real), index: chapters.length, title: '' });
+  }
+  if (!chapters.length) throw new Error(`${file.name} has no readable chapters.`);
+  const toc = new Map();
+  const addToc = (path, label) => { label = (label || '').replace(/\s+/g, ' ').trim(); path = zip.find(path) || path; if (label && !toc.has(path)) toc.set(path, label); };
+  const nav = [...manifest.values()].find(m => m.props.includes('nav'));
+  if (nav) try {
+    const d = xhtml(await zip.text(nav.href)), navs = [...d.getElementsByTagNameNS('*', 'nav')];
+    const t = navs.find(n => /toc/.test(n.getAttributeNS(OPS, 'type') || n.getAttribute('epub:type') || '')) || navs[0];
+    if (t) for (const a of t.getElementsByTagNameNS('*', 'a')) addToc(resolvePath(dirOf(nav.href), a.getAttribute('href')), a.textContent);
+  } catch { /* no usable nav */ }
+  const spine = opf.getElementsByTagNameNS('*', 'spine')[0];
+  const ncx = manifest.get(spine?.getAttribute('toc')) || [...manifest.values()].find(m => m.type === 'application/x-dtbncx+xml');
+  if (ncx) try {
+    const d = xml(await zip.text(ncx.href));
+    for (const np of d.getElementsByTagNameNS('*', 'navPoint')) {
+      const src = np.getElementsByTagNameNS('*', 'content')[0]?.getAttribute('src');
+      if (src) addToc(resolvePath(dirOf(ncx.href), src), np.getElementsByTagNameNS('*', 'text')[0]?.textContent);
+    }
+  } catch { /* no usable ncx */ }
+  chapters.forEach(c => { c.title = toc.get(c.path) || ''; });
+  const md = opf.getElementsByTagNameNS('*', 'metadata')[0];
+  const dcs = tag => md ? [...md.getElementsByTagNameNS(DC, tag)].map(e => e.textContent.trim()) : [];
+  return indexBook({ name: file.name, zip, chapters,
+    title: dcs('title')[0] || file.name.replace(/\.k?epub$/i, ''), creator: dcs('creator')[0] || '', idents: dcs('identifier') });
+}
+function findChapter(file) {
+  const b = S.book; if (!b || !file) return null;
+  return b.byPath.get(file) || b.byLower.get(file.toLowerCase()) || b.byBase.get(file.split('/').pop().toLowerCase()) || null;
+}
+
+/* ---------------- locating highlights in the text ---------------- */
+// Text is compared with whitespace / soft hyphens removed and curly quotes & dashes folded,
+// so small spacing differences (e.g. around footnote numbers) don't matter.
+const SKIP = c => c <= 32 || c === 0xa0 || c === 0xad || c === 0x85 || c === 0x1680 || (c >= 0x2000 && c <= 0x200f) ||
+  c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x2060 || c === 0x3000 || c === 0xfeff;
+function fold(c, ch) {
+  if (c === 0x2018 || c === 0x2019 || c === 0x02bc || c === 0x2032) return "'";
+  if (c === 0x201c || c === 0x201d || c === 0x2033) return '"';
+  if (c === 0x2010 || c === 0x2011 || c === 0x2013 || c === 0x2014 || c === 0x2212) return '-';
+  return ch;
+}
+function squash(s) { let o = ''; for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); if (!SKIP(c)) o += fold(c, s[i]); } return o; }
+const ignoredText = t => { const n = t.parentNode?.localName; return n === 'script' || n === 'style' || n === 'title'; };
+function buildIndex(root) {
+  const w = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const chars = [], nodes = [], offs = [], before = new Map();
+  for (let t; (t = w.nextNode());) {
+    if (ignoredText(t)) continue;
+    before.set(t, chars.length);
+    const d = t.data;
+    for (let j = 0; j < d.length; j++) { const c = d.charCodeAt(j); if (SKIP(c)) continue; chars.push(fold(c, d[j])); nodes.push(t); offs.push(j); }
+  }
+  return { str: chars.join(''), nodes, offs, before };
+}
+function idxOf(ix, b) {
+  if (!b || !ix.before.has(b.node)) return null;
+  let i = ix.before.get(b.node); const d = b.node.data;
+  for (let j = 0; j < b.offset && j < d.length; j++) if (!SKIP(d.charCodeAt(j))) i++;
+  return i;
+}
+function textAt(node, off) {
+  const w = node.ownerDocument.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  let last = null;
+  for (let t; (t = w.nextNode());) { last = t; if (off <= t.data.length) return { node: t, offset: off }; off -= t.data.length; }
+  return last ? { node: last, offset: last.data.length } : null;
+}
+// Kobo/Adobe "point(/1/4/2/36/1:62)": /1 = root element, then each step is a 1-based index
+// over ALL child nodes (text and elements), ":n" = character offset. As a fallback we also try
+// EPUB-CFI-style steps (even = Nth element child, odd = text between element children).
+function resolvePoint(doc, pt, mode) {
+  if (!pt || !pt.steps.length) return null;
+  if (mode === 'nodes') {
+    let node = doc.documentElement;
+    for (const s of pt.steps.slice(1)) { node = node.childNodes[s - 1]; if (!node) return null; }
+    if (node.nodeType === 3) return { node, offset: Math.min(pt.offset || 0, node.data.length) };
+    return node.nodeType === 1 ? textAt(node, pt.offset || 0) : null;
+  }
+  let node = doc.documentElement;
+  const steps = pt.steps[0] % 2 === 1 ? pt.steps.slice(1) : pt.steps;
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i], last = i === steps.length - 1, kids = node.children;
+    if (s % 2 === 0) {
+      node = kids[s / 2 - 1]; if (!node) return null;
+      if (last) return textAt(node, pt.offset || 0);
+    } else {
+      if (!last) return null;
+      const k = (s - 1) / 2, prev = k > 0 ? kids[k - 1] : null, stop = kids[k] || null;
+      if (k > 0 && !prev) return null;
+      let off = pt.offset || 0;
+      for (let c = prev ? prev.nextSibling : node.firstChild; c && c !== stop; c = c.nextSibling) {
+        if (c.nodeType !== 3) continue;
+        if (off <= c.data.length) return { node: c, offset: off };
+        off -= c.data.length;
+      }
+      return null;
+    }
+  }
+  return null;
+}
+function nearest(str, sub, near) {
+  let i = str.indexOf(sub), best = -1, bd = Infinity;
+  while (i >= 0) {
+    const d = near == null ? 0 : Math.abs(i - near);
+    if (d < bd) { bd = d; best = i; }
+    if (near == null) break;
+    i = str.indexOf(sub, i + 1);
+  }
+  return best;
+}
+function placeInChapter(doc, anns) {
+  const ix = buildIndex(bodyOf(doc)), str = ix.str, out = [];
+  for (const a of anns) {
+    const want = squash(a.text), sameFile = a.end && a.end.file === a.start?.file;
+    let pa = null, hit = null;
+    for (const mode of ['nodes', 'cfi']) {
+      const s = idxOf(ix, resolvePoint(doc, a.start, mode));
+      if (s == null) continue;
+      if (pa == null) pa = s;
+      if (a.kind !== 'highlight') break;
+      const e = sameFile ? idxOf(ix, resolvePoint(doc, a.end, mode)) : null;
+      if (e != null && e > s && str.slice(s, e) === want) { hit = { from: s, to: e, via: mode }; break; }
+    }
+    if (a.kind !== 'highlight') { out.push({ a, from: pa, to: pa, how: pa == null ? 'missing' : 'anchor' }); continue; }
+    if (hit) { out.push({ a, ...hit, how: 'exact' }); continue; }
+    let i = nearest(str, want, pa);
+    if (i >= 0) { out.push({ a, from: i, to: i + want.length, how: 'exact', via: 'search' }); continue; }
+    // approximate: anchor on the beginning and/or end of the passage, else the longest matching beginning
+    const n = Math.min(40, Math.floor(want.length / 3));
+    if (n >= 12) {
+      const h = nearest(str, want.slice(0, n), pa);
+      const t = nearest(str, want.slice(-n), h >= 0 ? h + want.length - n : (pa == null ? null : pa + want.length - n));
+      const tEnd = t >= 0 ? t + n : -1;
+      let span = null;
+      if (h >= 0 && tEnd > h && tEnd - h <= want.length * 1.3 + 20) span = [h, tEnd];
+      else if (h >= 0) span = [h, Math.min(str.length, h + want.length)];
+      else if (tEnd >= 0) span = [Math.max(0, tEnd - want.length), tEnd];
+      if (span) { out.push({ a, from: span[0], to: span[1], how: 'approx' }); continue; }
+    }
+    if (want.length >= 20 && str.includes(want.slice(0, 20))) {
+      let lo = 20, hi = want.length;
+      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (str.includes(want.slice(0, mid))) lo = mid; else hi = mid - 1; }
+      i = nearest(str, want.slice(0, lo), pa);
+      out.push({ a, from: i, to: i + lo, how: 'approx' }); continue;
+    }
+    out.push({ a, from: pa, to: pa, how: pa == null ? 'missing' : 'anchor' });
+  }
+  return out;
+}
+function wrapRange(root, from, to, a) {
+  const ix = buildIndex(root);
+  if (from >= ix.nodes.length || to > ix.nodes.length) return false;
+  const n1 = ix.nodes[from], o1 = ix.offs[from], n2 = ix.nodes[to - 1], o2 = ix.offs[to - 1] + 1;
+  const doc = root.ownerDocument, w = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT), list = [];
+  w.currentNode = n1;
+  for (let t = n1; t; t = w.nextNode()) { list.push(t); if (t === n2) break; }
+  if (list[list.length - 1] !== n2) return false;
+  for (let t of list) {
+    const s = t === n1 ? o1 : 0, e = t === n2 ? o2 : t.data.length;
+    if (s >= e || !t.data.slice(s, e).trim() || ignoredText(t) || t.parentNode.namespaceURI !== XHTML) continue;
+    if (e < t.data.length) t.splitText(e);
+    if (s > 0) t = t.splitText(s);
+    const m = doc.createElementNS(XHTML, 'mark');
+    m.setAttribute('class', `c${a.color}${a.note ? ' has-note' : ''}`);
+    m.setAttribute('data-id', a.id);
+    if (a.note) m.setAttribute('title', a.note);
+    t.parentNode.insertBefore(m, t); m.appendChild(t);
+  }
+  return true;
+}
+function insertAnchor(root, at, a) {
+  const ix = buildIndex(root), doc = root.ownerDocument;
+  const span = doc.createElementNS(XHTML, 'span');
+  span.setAttribute('class', a.kind === 'highlight' ? 'anchor' : 'bm');
+  span.setAttribute('data-id', a.id);
+  if (a.note) span.setAttribute('title', a.note);
+  if (at < ix.nodes.length) { const t = ix.nodes[at].splitText(ix.offs[at]); t.parentNode.insertBefore(span, t); }
+  else if (ix.nodes.length) { const t = ix.nodes[ix.nodes.length - 1]; t.parentNode.insertBefore(span, t.nextSibling); }
+  else root.appendChild(span);
+}
+
+/* ---------------- rendering the book (EPUB content is untrusted: strip anything active) ---------------- */
+const DROP = 'script,style,link,meta,base,iframe,frame,frameset,object,embed,applet,form,input,button,textarea,select,option,audio,video,source,track,noscript,template,foreignObject,use,animate,set,animateMotion,animateTransform';
+const BAD_ATTR = new Set(['style', 'srcset', 'background', 'poster', 'lowsrc', 'dynsrc', 'action', 'formaction', 'data', 'srcdoc', 'ping', 'codebase', 'longdesc', 'autofocus', 'contenteditable']);
+function sanitize(root, ch) {
+  root.querySelectorAll(DROP).forEach(n => n.remove());
+  const dir = dirOf(ch.path);
+  for (const e of root.querySelectorAll('*')) {
+    const tag = e.localName;
+    for (const at of [...e.attributes]) {
+      const n = at.name.toLowerCase(), ln = (at.localName || '').toLowerCase();
+      if (n.startsWith('on') || BAD_ATTR.has(n) || /^\s*(javascript|vbscript|data:text)/i.test(at.value)) e.removeAttributeNode(at);
+      else if ((ln === 'href' || ln === 'src') && tag !== 'a' && tag !== 'img' && tag !== 'image') e.removeAttributeNode(at);
+    }
+    if (e.hasAttribute('id')) e.setAttribute('id', `x${ch.index}-${e.getAttribute('id')}`);
+    if (tag === 'img' || tag === 'image') {
+      const src = e.getAttribute('src') || e.getAttributeNS(XLINK, 'href') || e.getAttribute('href');
+      e.removeAttribute('src'); e.removeAttribute('href'); e.removeAttributeNS(XLINK, 'href');
+      if (src && /^data:image\//i.test(src) && !/^data:image\/svg/i.test(src)) e.setAttribute(tag === 'img' ? 'src' : 'href', src);
+      else if (src && !/^[a-z][a-z0-9+.-]*:/i.test(src)) e.setAttribute('data-zip', resolvePath(dir, src));
+    } else if (tag === 'a') {
+      const href = e.getAttribute('href') || e.getAttributeNS(XLINK, 'href');
+      e.removeAttributeNS(XLINK, 'href'); e.removeAttribute('target');
+      if (!href) continue;
+      if (/^https?:/i.test(href)) { e.setAttribute('href', href); e.setAttribute('target', '_blank'); e.setAttribute('rel', 'noopener noreferrer'); }
+      else if (/^[a-z][a-z0-9+.-]*:/i.test(href)) e.removeAttribute('href');
+      else { const [p, frag] = href.split('#'); e.setAttribute('data-goto', (p ? resolvePath(dir, p) : ch.path) + '#' + (frag || '')); e.setAttribute('href', '#'); }
+    }
+  }
+}
+async function loadImages() {
+  for (const img of document.querySelectorAll('#reader [data-zip]')) {
+    const p = img.getAttribute('data-zip'), bytes = await S.book.zip.bytes(p);
+    if (!bytes) continue;
+    const url = URL.createObjectURL(new Blob([bytes], { type: MIME[p.split('.').pop().toLowerCase()] || '' }));
+    S.urls.push(url);
+    if (img.localName === 'img') img.src = url; else { img.setAttribute('href', url); img.setAttributeNS(XLINK, 'xlink:href', url); }
+  }
+}
+
+/* ---------------- ordering, page-turn joins ---------------- */
+function prettyFile(f) {
+  let b = (f || '').split('/').pop().replace(/\.(x?html?|xml)$/i, '');
+  const m = b.match(/^(?:chapter|chap|ch)[\s_-]*0*(\d+)$/i);
+  if (m) return `Chapter ${m[1]}`;
+  b = b.replace(/[_-]+/g, ' ').replace(/([a-z])(\d)/gi, '$1 $2').replace(/\s+0+(\d)/g, ' $1').trim();
+  return b ? b[0].toUpperCase() + b.slice(1) : 'Unknown section';
+}
+const chapterTitle = f => findChapter(f)?.title || prettyFile(f);
+function cmpPoints(x, y) {
+  if (!x || !y) return 0;
+  for (let i = 0; i < Math.max(x.steps.length, y.steps.length); i++) { const d = (x.steps[i] ?? -1) - (y.steps[i] ?? -1); if (d) return d; }
+  return (x.offset || 0) - (y.offset || 0);
+}
+function sortAnnots() {
+  const minProg = new Map();
+  for (const a of S.annots) { const p = isNaN(a.progress) ? 1 : a.progress; if (!minProg.has(a.file) || p < minProg.get(a.file)) minProg.set(a.file, p); }
+  const key = f => { const c = findChapter(f); return c ? c.index : 1e6 + (minProg.get(f) || 0); };
+  const at = a => S.placed.get(a.id)?.from;  // where it was actually found in the book, once known
+  S.annots.sort((x, y) => (key(x.file) - key(y.file)) ||
+    (at(x) != null && at(y) != null ? at(x) - at(y) : cmpPoints(x.start, y.start)) || ((x.progress || 0) - (y.progress || 0)));
+  linkParts();
+}
+// A highlight that picks up exactly where another stopped (same colour, same run of text,
+// made within a few minutes) is one passage split by a page turn: show them as one entry.
+function continues(a, b) {
+  if (a.kind !== 'highlight' || b.kind !== 'highlight' || a.file !== b.file || a.color !== b.color || !a.end || !b.start) return false;
+  if (a.end.steps.join('/') !== b.start.steps.join('/')) return false;
+  const gap = (b.start.offset || 0) - (a.end.offset || 0), dt = Math.abs(new Date(b.date) - new Date(a.date)) / 1000;
+  return gap >= 0 && gap <= 2 && !(dt > 300);
+}
+function linkParts() {
+  S.byId = new Map(S.annots.map(a => [a.id, a]));
+  for (const a of S.annots) { a.parts = [a]; a.head = a; }
+  const seen = [];
+  for (const b of S.annots) {
+    if (b.kind !== 'highlight') continue;
+    const a = seen.find(x => continues(x, b) && x.head.parts[x.head.parts.length - 1] === x);
+    if (a) { b.head = a.head; b.head.parts.push(b); }
+    seen.push(b);
+  }
+}
+const isHead = a => a.head === a;
+const fullText = a => a.parts.map(p => p.text).filter(Boolean).join(' ');
+const fullNote = a => a.parts.map(p => p.note).filter(Boolean).join('\n\n');
+
+/* ---------------- main rebuild ---------------- */
+async function rebuild() {
+  S.urls.forEach(u => URL.revokeObjectURL(u)); S.urls = [];
+  S.placed = new Map();
+  sortAnnots();
+  const reader = $('#reader'); reader.textContent = '';
+  if (S.book) {
+    const byCh = new Map();
+    for (const a of S.annots) { const c = findChapter(a.file); if (c) (byCh.get(c) || byCh.set(c, []).get(c)).push(a); }
+    for (const ch of S.book.chapters) {
+      const doc = xhtml(ch.raw), body = bodyOf(doc), anns = byCh.get(ch);
+      if (anns) {
+        for (const r of placeInChapter(doc, anns)) {
+          let ok = false;
+          if (r.from != null && r.to > r.from) ok = wrapRange(body, r.from, r.to, r.a);
+          if (!ok && r.from != null) { insertAnchor(body, r.from, r.a); if (r.a.kind === 'highlight') r.how = 'anchor'; }
+          S.placed.set(r.a.id, r);
+        }
+      }
+      sanitize(body, ch);
+      const sec = el('section', 'chapter'); sec.id = 'ch' + ch.index; sec.dataset.path = ch.path;
+      for (const n of [...body.childNodes]) sec.appendChild(document.importNode(n, true));
+      reader.appendChild(sec);
+    }
+    loadImages();
+    sortAnnots();
+  }
+  renderAll();
+}
+
+/* ---------------- panel ---------------- */
+function renderAll() {
+  const hasB = !!S.book;
+  $('#workspace').classList.toggle('no-book', !hasB);
+  $('#workspace').classList.toggle('has-book', hasB);
+  $('#tabs').classList.toggle('on', hasB);
+  $('#copyBtn').disabled = !S.annots.some(a => a.kind !== 'bookmark');
+  const title = S.meta?.title || S.book?.title || '', who = S.meta?.creator || S.book?.creator || '';
+  const id = $('#bookId'); id.textContent = '';
+  if (title) { id.appendChild(el('b', null, title)); if (who) id.append(' · ' + who); }
+  if (S.sampleBook || S.sampleAnnots) id.appendChild(el('span', 'pill', 'Sample'));
+  document.title = title && !S.sampleAnnots ? `${title} · Highlight Reader` : 'Highlight Reader';
+  renderStats(); renderChips(); renderBanners(); renderList();
+}
+function renderStats() {
+  const h = S.annots.filter(a => a.kind === 'highlight' && isHead(a)).length, n = S.annots.filter(a => a.note).length, b = S.annots.filter(a => a.kind === 'bookmark').length;
+  const s = $('#stats'); s.textContent = '';
+  if (!S.annots.length) { s.textContent = 'No highlights loaded.'; return; }
+  [[h, 'highlight'], [n, 'note'], [b, 'bookmark']].filter(([c]) => c).forEach(([c, w], i) => {
+    if (i) s.append(' · '); s.appendChild(el('b', null, String(c))); s.append(` ${w}${c === 1 ? '' : 's'}`);
+  });
+}
+function chip(label, cls, pressed, onClick, swatch) {
+  const c = el('button', 'chip ' + (cls || '')); c.type = 'button'; c.setAttribute('aria-pressed', String(pressed));
+  if (swatch) c.appendChild(el('span', 'sw'));
+  c.append(label); c.onclick = onClick; return c;
+}
+function renderChips() {
+  const box = $('#chips'); box.textContent = '';
+  const counts = new Map();
+  for (const a of S.annots) if (a.kind === 'highlight' && isHead(a)) counts.set(a.color, (counts.get(a.color) || 0) + 1);
+  const colors = [...counts.keys()].sort();
+  if (colors.length > 1) for (const c of colors) {
+    const b = chip(String(counts.get(c)), 'c' + c, !S.colorsOff.has(c), () => { S.colorsOff.has(c) ? S.colorsOff.delete(c) : S.colorsOff.add(c); renderChips(); renderList(); }, true);
+    b.title = 'Show or hide highlights in this colour'; box.appendChild(b);
+  }
+  if (S.annots.some(a => a.note)) box.appendChild(chip('Only with notes', 'toggle', S.notesOnly, () => { S.notesOnly = !S.notesOnly; renderChips(); renderList(); }));
+  if (S.annots.some(a => a.kind === 'bookmark')) box.appendChild(chip('Bookmarks', 'toggle', S.showBm, () => { S.showBm = !S.showBm; renderChips(); renderList(); }));
+}
+function filesButton(label, primary) {
+  const l = el('label', 'btn' + (primary ? ' primary' : '')); l.append(label);
+  const i = el('input'); i.type = 'file'; i.multiple = true; i.onchange = () => { handleFiles(i.files); i.value = ''; };
+  l.appendChild(i); return l;
+}
+function renderBanners() {
+  const box = $('#banners'); box.textContent = '';
+  const banner = (cls) => { const b = el('div', 'banner' + (cls ? ' ' + cls : '')); box.appendChild(b); return b; };
+  if (S.sampleAnnots || S.sampleBook) {
+    const b = banner();
+    const p = el('p'); p.append('This is a short sample book. Open your own ');
+    p.appendChild(el('b', null, '.annot')); p.append(' file, plus the book’s '); p.appendChild(el('b', null, '.epub'));
+    p.append(' if you have it, to see your highlights. You can also drag the files onto this page. They stay in your browser and are never uploaded.');
+    b.appendChild(p);
+    const row = el('div', 'row'); row.appendChild(filesButton('Open your files…', true)); b.appendChild(row);
+    const d = el('details'); d.appendChild(el('summary', null, 'Where do I find these files?'));
+    d.appendChild(el('p', null, 'Connect the Kobo to a computer with a USB cable and open it like a drive. For books you added yourself, the highlights are usually in the “Digital Editions” → “Annotations” folder, one .annot file per book, named after the book. The .epub is wherever you copied the book onto the Kobo.'));
+    d.appendChild(el('p', null, 'Books bought from the Kobo store keep their highlights in your Kobo account instead, and Kobo can export those itself. This page is not made by or affiliated with Kobo.'));
+    b.appendChild(d);
+    if (S.sampleAnnots === S.sampleBook) return;
+  }
+  if (S.annots.length && !S.book) {
+    const b = banner(); b.appendChild(el('p', null, 'Add the book’s .epub to see every highlight in place in the text.'));
+    const row = el('div', 'row'); row.appendChild(filesButton('Add the .epub…')); b.appendChild(row);
+  }
+  if (S.book && !S.annots.length) {
+    const b = banner(); b.appendChild(el('p', null, 'Add the .annot file to show your highlights in this book.'));
+    const row = el('div', 'row'); row.appendChild(filesButton('Add the .annot…')); b.appendChild(row);
+  }
+  if (S.book && S.annots.length && !S.sampleBook && !S.sampleAnnots) {
+    const hs = S.annots.filter(a => a.kind === 'highlight');
+    const found = hs.filter(a => ['exact', 'approx'].includes(S.placed.get(a.id)?.how)).length;
+    const norm = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const sameIsbn = S.meta?.identifier && S.book.idents.some(i => norm(i).includes(norm(S.meta.identifier)));
+    const sameTitle = S.meta?.title && norm(S.book.title).startsWith(norm(S.meta.title).slice(0, 12));
+    if (!sameIsbn && !sameTitle && S.meta?.title)
+      banner('warn').appendChild(el('p', null, `These highlights are for “${S.meta.title}”, but the .epub is “${S.book.title}”.`));
+    if (hs.length && found < hs.length)
+      banner(found < hs.length * 0.6 ? 'warn' : '').appendChild(el('p', null,
+        `${found} of ${hs.length} highlights were found in this .epub. ${found < hs.length * 0.6 ? 'It may be a different edition from the one on the Kobo.' : 'The others are marked below.'}`));
+  }
+}
+function visible(a) {
+  if (!isHead(a)) return false;
+  if (a.kind === 'bookmark' && !S.showBm) return false;
+  if (a.kind === 'highlight' && S.colorsOff.has(a.color)) return false;
+  const note = fullNote(a);
+  if (S.notesOnly && !note) return false;
+  const q = S.q.trim().toLowerCase();
+  return !q || fullText(a).toLowerCase().includes(q) || note.toLowerCase().includes(q);
+}
+function entry(a) {
+  const rs = a.parts.map(p => S.placed.get(p.id)), hows = rs.map(r => r ? r.how : 'missing');
+  const jumpable = S.book && rs.some(r => r && r.from != null);
+  const c = el('article', `entry c${a.color}${a.kind === 'bookmark' ? ' bookmark' : ''}${jumpable ? ' clickable' : ''}`);
+  c.dataset.id = a.id;
+  const text = fullText(a), note = fullNote(a);
+  if (a.kind === 'bookmark') { const q = el('div', 'quote'); q.appendChild(el('span', 'ribbon')); q.append('Bookmark'); c.appendChild(q); }
+  else if (text) { const q = el('blockquote', 'quote'); q.appendChild(el('span', null, text)); c.appendChild(q); }
+  if (note) c.appendChild(el('div', 'note', note));
+  const meta = el('div', 'meta');
+  if (!isNaN(a.progress)) meta.appendChild(el('span', null, `${pct(a.progress)} through the book`));
+  if (a.date) meta.appendChild(el('span', null, fmtDate(a.date)));
+  if (a.parts.length > 1) meta.appendChild(el('span', null, 'joined across a page turn'));
+  if (S.book && a.kind === 'highlight') {
+    if (hows.every(h => h === 'missing')) meta.appendChild(el('span', 'flag', 'Not found in this .epub'));
+    else if (hows.some(h => h === 'anchor' || h === 'missing')) meta.appendChild(el('span', 'flag', 'Text not matched, jumps to its spot'));
+    else if (hows.includes('approx')) meta.appendChild(el('span', null, 'Matched approximately'));
+  }
+  c.appendChild(meta);
+  if (jumpable) { c.tabIndex = 0; c.onclick = () => jump(a.id); c.onkeydown = e => { if (e.key === 'Enter') jump(a.id); }; }
+  return c;
+}
+function renderList() {
+  const list = $('#list'); list.textContent = '';
+  const groups = [];
+  for (const a of S.annots) {
+    if (!visible(a)) continue;
+    if (!groups.length || groups[groups.length - 1].file !== a.file) groups.push({ file: a.file, items: [] });
+    groups[groups.length - 1].items.push(a);
+  }
+  if (!groups.length && S.annots.length) { list.appendChild(el('div', 'empty', 'Nothing matches these filters.')); return; }
+  for (const g of groups) {
+    const h = el('h3', 'group-title'); h.appendChild(el('span', null, chapterTitle(g.file))); h.appendChild(el('span', null, String(g.items.length)));
+    list.appendChild(h);
+    for (const a of g.items) list.appendChild(entry(a));
+  }
+}
+
+/* ---------------- interactions ---------------- */
+const narrow = () => matchMedia('(max-width: 899px)').matches;
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+function showTab(which) {
+  document.body.classList.toggle('show-panel', which === 'list');
+  $('#tabBook').setAttribute('aria-selected', String(which !== 'list'));
+  $('#tabList').setAttribute('aria-selected', String(which === 'list'));
+}
+function setActive(id) {
+  document.querySelectorAll('.entry.active').forEach(c => c.classList.remove('active'));
+  const c = document.querySelector(`.entry[data-id="${id}"]`); if (c) c.classList.add('active');
+  return c;
+}
+function jump(id) {
+  const a = S.byId.get(id);
+  const targets = (a ? a.parts : [{ id }]).flatMap(p => [...document.querySelectorAll(`#reader [data-id="${p.id}"]`)]);
+  if (!targets.length) return;
+  if (narrow()) showTab('book');
+  setActive(id);
+  targets[0].scrollIntoView({ block: 'center', behavior: narrow() || reduced() ? 'auto' : 'smooth' });
+  targets.forEach(t => { t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash'); });
+}
+$('#reader').addEventListener('click', e => {
+  const link = e.target.closest('a[data-goto]');
+  if (link) {
+    e.preventDefault();
+    const [p, frag] = link.dataset.goto.split('#'), ch = findChapter(p);
+    if (!ch) return;
+    const t = (frag && document.getElementById(`x${ch.index}-${frag}`)) || document.getElementById('ch' + ch.index);
+    t?.scrollIntoView({ block: 'start' });
+    return;
+  }
+  const m = e.target.closest('[data-id]');
+  if (!m) return;
+  const id = S.byId.get(m.dataset.id)?.head.id || m.dataset.id;
+  if (narrow()) showTab('list');
+  if (!setActive(id)) {  // hidden by filters: clear them so the entry shows
+    S.q = ''; $('#search').value = ''; S.colorsOff.clear(); S.notesOnly = false; S.showBm = true; renderChips(); renderList();
+  }
+  setActive(id)?.scrollIntoView({ block: 'nearest', behavior: narrow() || reduced() ? 'auto' : 'smooth' });
+});
+$('#search').addEventListener('input', e => { S.q = e.target.value; renderList(); });
+$('#tabBook').onclick = () => showTab('book');
+$('#tabList').onclick = () => showTab('list');
+
+function toMarkdown() {
+  const L = [`# ${S.meta?.title || S.book?.title || 'Highlights'}`];
+  const who = S.meta?.creator || S.book?.creator; if (who) L.push('', `*${who}*`);
+  let cur = null;
+  for (const a of S.annots) {
+    if (a.kind === 'bookmark' || !isHead(a)) continue;
+    if (a.file !== cur) { cur = a.file; L.push('', `## ${chapterTitle(a.file)}`); }
+    const text = fullText(a), note = fullNote(a);
+    L.push('');
+    if (text) L.push(`> ${text}`);
+    if (note) { if (text) L.push(''); L.push(`**Note:** ${note.replace(/\n/g, '  \n')}`); }
+  }
+  return L.join('\n') + '\n';
+}
+function showCopySheet(md) {
+  const veil = el('div', 'sheet-veil'), sheet = el('div', 'sheet');
+  sheet.setAttribute('role', 'dialog'); sheet.setAttribute('aria-label', 'Your notes as text');
+  sheet.appendChild(el('h2', null, 'Your notes as text'));
+  sheet.appendChild(el('p', null, 'Select all of it, copy it, and paste it into Notes, Docs or Obsidian.'));
+  const ta = el('textarea'); ta.id = 'copyText'; ta.readOnly = true; ta.value = md; sheet.appendChild(ta);
+  const row = el('div', 'row'), close = el('button', 'btn', 'Close'); close.type = 'button';
+  const done = () => veil.remove();
+  close.onclick = done; veil.onclick = e => { if (e.target === veil) done(); };
+  veil.onkeydown = e => { if (e.key === 'Escape') done(); };
+  row.appendChild(close); sheet.appendChild(row); veil.appendChild(sheet); document.body.appendChild(veil);
+  ta.focus(); ta.select();
+}
+$('#copyBtn').onclick = async () => {
+  const md = toMarkdown(), n = S.annots.filter(a => a.kind !== 'bookmark' && isHead(a)).length;
+  try { await navigator.clipboard.writeText(md); toast(`Copied ${n} highlight${n === 1 ? '' : 's'} as text. Paste them anywhere.`); }
+  catch { showCopySheet(md); }
+};
+
+async function handleFiles(files) {
+  const arr = [...files]; if (!arr.length) return;
+  const annotTexts = []; let epub = null;
+  try {
+    for (const f of arr) {
+      const head = new Uint8Array(await f.slice(0, 2).arrayBuffer());
+      if (head[0] === 0x50 && head[1] === 0x4b) epub = f;
+      else annotTexts.push({ name: f.name, text: await f.text() });
+    }
+    let newAnnots = null, newMeta = null, newBook = null;
+    if (annotTexts.length) {
+      const parsed = annotTexts.map(x => parseAnnot(x.text, x.name));
+      const seen = new Set(); newAnnots = [];
+      for (const p of parsed) for (const a of p.list) {
+        const k = a.uid || `${a.startRaw}|${a.endRaw}|${a.text}`;
+        if (!seen.has(k)) { seen.add(k); newAnnots.push(a); }
+      }
+      newAnnots.forEach((a, i) => { a.id = 'h' + i; });
+      newMeta = parsed[0].meta;
+    }
+    if (epub) { toast('Opening the book…'); newBook = await loadEpub(epub); }
+    if (newAnnots) {
+      S.annots = newAnnots; S.meta = newMeta; S.sampleAnnots = false;
+      S.colorsOff.clear(); S.notesOnly = false; S.showBm = true; S.q = ''; $('#search').value = '';
+      if (!newBook && S.sampleBook) { S.book = null; S.sampleBook = false; }
+    }
+    if (newBook) {
+      S.book = newBook; S.sampleBook = false;
+      if (!newAnnots && S.sampleAnnots) { S.annots = []; S.meta = null; S.sampleAnnots = false; }
+    }
+    await rebuild();
+    $('#reader').scrollTop = 0; scrollTo(0, 0); $('#panel').scrollTop = 0;
+    toast(S.book && S.annots.length ? 'Loaded. Click any highlight to jump to it in the book.' : 'Loaded.');
+  } catch (err) {
+    console.error(err);
+    toast(err.message || String(err), true);
+  }
+}
+$('#pick').addEventListener('change', e => { handleFiles(e.target.files); e.target.value = ''; });
+let dragDepth = 0;
+addEventListener('dragenter', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); } });
+addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+addEventListener('dragover', e => e.preventDefault());
+addEventListener('drop', e => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files); });
+
+/* ---------------- built-in sample (original text, written for this page) ---------------- */
+function loadSample() {
+  const chapters = [
+    { file: 'OEBPS/text/chapter1.xhtml', title: 'I. Winter', paras: [
+      'The keeper’s year began in November, when the supply boat stopped running and the island belonged to the wind. He kept a ledger of small things: the hour the lamp was lit, the oil it burned, the ships that passed close enough to read their names.',
+      'Most nights nothing happened, and he wrote that down too. A blank line meant the light had done its work. Over the years he came to think of those empty lines as the truest record he kept, because they showed what had been prevented rather than what had occurred.',
+      'On clear evenings he climbed to the gallery and watched the beam sweep across the water, counting the seconds between flashes as if he were taking the pulse of the sea.'] },
+    { file: 'OEBPS/text/chapter2.xhtml', title: 'II. Summer', paras: [
+      'Summer brought visitors, and visitors brought questions. They wanted to know whether he was lonely, whether the noise of the fog signal kept him awake, whether he had ever seen a wreck.',
+      'He answered the way he wrote in the ledger, plainly and without decoration. Loneliness, he told them, was mostly a matter of weather. The fog signal he no longer heard. And the wreck he remembered best was one that never happened, a schooner that turned in time because the light was where it was supposed to be.',
+      'When the last boat of the season left in October, he walked the island once from end to end and then went up to light the lamp.'] }
+  ];
+  const doc = c => `<?xml version="1.0" encoding="utf-8"?>\n<html xmlns="http://www.w3.org/1999/xhtml">\n<head><title>${esc(c.title)}</title></head>\n<body>\n<section>\n<h1>${esc(c.title)}</h1>\n${c.paras.map(p => `<p>${esc(p)}</p>`).join('\n')}\n</section>\n</body>\n</html>`;
+  // [chapter, paragraph, quoted text or null for a bookmark, colour, minutes after start, note, start offset override]
+  const picks = [
+    [0, 0, 'He kept a ledger of small things', '1', 0],
+    [0, 1, 'A blank line meant the light had done its work.', '1', 3],
+    [0, 1, 'Over the years he came to think of those empty lines as the truest record he kept,', '2', 5, 'The whole book in one sentence: the record of what didn’t happen.'],
+    [0, 1, 'because they showed what had been prevented rather than what had occurred.', '2', 6],
+    [0, 2, null, '0', 9],
+    [1, 1, 'Loneliness, he told them, was mostly a matter of weather.', '3', 30, 'True for me too, honestly.'],
+    [1, 1, 'the wreck he remembered best was one that never happened', '4', 32]
+  ];
+  const t0 = Date.parse('2026-10-04T19:10:00Z');
+  const total = chapters.reduce((n, c) => n + c.paras.join(' ').length, 0);
+  const before = (ci, pi) => chapters.slice(0, ci).reduce((n, c) => n + c.paras.join(' ').length, 0) + chapters[ci].paras.slice(0, pi).join(' ').length;
+  const ann = picks.map(([ci, pi, text, color, min, note], k) => {
+    const c = chapters[ci], para = c.paras[pi], off = text ? para.indexOf(text) : 0;
+    const pt = o => `${c.file}#point(/1/4/2/${2 * pi + 4}/1:${o})`;
+    const prog = ((before(ci, pi) + off) / total).toFixed(4);
+    return `<annotation><dc:identifier>urn:uuid:sample-${k}</dc:identifier><dc:date>${new Date(t0 + min * 60000).toISOString().replace('.000', '')}</dc:date>` +
+      `<target><fragment start="${pt(off)}" end="${pt(text ? off + text.length : off)}" progress="${prog}" color="${color}">${text ? `<text>${esc(text)}</text>` : ''}</fragment></target>` +
+      (note ? `<content><text>${esc(note)}</text></content>` : '') + '</annotation>';
+  });
+  const annotXml = `<annotationSet xmlns:dc="${DC}" xmlns="${ANS}"><publication><dc:identifier>sample</dc:identifier><dc:title>The Keeper’s Year</dc:title><dc:creator>Sample text</dc:creator></publication>${ann.join('')}</annotationSet>`;
+  const parsed = parseAnnot(annotXml, 'sample');
+  parsed.list.forEach((a, i) => { a.id = 'h' + i; });
+  S.annots = parsed.list; S.meta = parsed.meta;
+  S.book = indexBook({ name: 'sample', title: 'The Keeper’s Year', creator: 'Sample text', idents: [],
+    zip: { bytes: async () => null }, chapters: chapters.map((c, i) => ({ path: c.file, raw: doc(c), index: i, title: c.title })) });
+  S.sampleAnnots = S.sampleBook = true;
+  return rebuild();
+}
+loadSample().catch(err => { console.error(err); toast('The sample could not load. You can still open your own files.', true); });
+</script>
+
+</html>
